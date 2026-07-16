@@ -2052,42 +2052,10 @@ impl Config {
         self.resolve_two_pass_compaction().value
     }
     pub(crate) fn resolve_telemetry_mode(&self) -> Resolved<TelemetryMode> {
-        if let Some(mode) = self.requirements.telemetry.pinned() {
-            return Resolved::new(mode, ConfigSource::Requirement);
-        }
-        if let Some(mode) = env_telemetry_mode("GROK_TELEMETRY_ENABLED") {
-            return Resolved::new(mode, ConfigSource::Env);
-        }
-        if let Some(mode) = self.features.telemetry {
-            return Resolved::new(mode, ConfigSource::Config);
-        }
-        if let Some(rs) = self.remote_settings.as_ref() {
-            if let Some(mode_str) = rs.telemetry_mode.as_deref()
-                && let Some(mode) = TelemetryMode::parse(mode_str)
-            {
-                return Resolved::new(mode, ConfigSource::Remote);
-            }
-            if let Some(val) = rs.telemetry_enabled {
-                return Resolved::new(TelemetryMode::from(val), ConfigSource::Remote);
-            }
-        }
         Resolved::new(TelemetryMode::Disabled, ConfigSource::Default)
     }
     pub(crate) fn resolve_trace_upload(&self) -> Resolved<bool> {
-        let mode = self.resolve_telemetry_mode();
-        let ff = if mode.value.is_disabled() {
-            None
-        } else {
-            self.remote_settings
-                .as_ref()
-                .and_then(|s| s.trace_upload_enabled)
-        };
-        BoolFlag::env("GROK_TELEMETRY_TRACE_UPLOAD")
-            .requirement(self.requirements.trace_upload.pinned())
-            .config(self.telemetry.trace_upload)
-            .feature_flag(ff)
-            .default(mode.value.is_enabled())
-            .resolve()
+        Resolved::new(false, ConfigSource::Default)
     }
     /// Resolve jemalloc heap-profile config from stored remote settings + gates.
     pub fn resolve_jemalloc_heap_profile(
@@ -2891,29 +2859,18 @@ impl SyncBoolFlag {
 /// Sync slice of [`Config::resolve_telemetry_mode`] for use before the tokio
 /// runtime (e.g. `init_sentry`). `true` only when explicitly off.
 pub fn is_telemetry_disabled_sync() -> bool {
-    !SyncBoolFlag::new(telemetry_enabled_from_toml)
-        .disable_env("DISABLE_TELEMETRY")
-        .enable_env(grok_telemetry_env_enabled)
-        .resolve()
+    true
 }
 /// Like [`is_telemetry_disabled_sync`] but only `true` when telemetry is
 /// *explicitly* off; absence is not disabled (`.default(true)`) so remote-only
 /// enablement still builds the OTLP exporter (the runtime gate then governs it).
 pub fn is_telemetry_explicitly_disabled_sync() -> bool {
-    !SyncBoolFlag::new(telemetry_enabled_from_toml)
-        .disable_env("DISABLE_TELEMETRY")
-        .enable_env(grok_telemetry_env_enabled)
-        .default(true)
-        .resolve()
+    true
 }
 /// Sync sibling of [`is_telemetry_disabled_sync`] scoped to Sentry. Inherits
 /// from telemetry when no Sentry-specific signal is set.
 pub fn is_error_reporting_disabled_sync() -> bool {
-    !SyncBoolFlag::new(error_reporting_enabled_from_toml)
-        .disable_env("DISABLE_ERROR_REPORTING")
-        .enable_env(|| env_bool("GROK_ERROR_REPORTING"))
-        .inherit(|| !is_telemetry_disabled_sync())
-        .resolve()
+    true
 }
 /// `[features] telemetry` as enabled bool. SessionMetrics counts as enabled
 /// — see ERROR_REPORTING_PLAN.md. `None` for absent or unparseable.
@@ -2969,16 +2926,8 @@ pub(crate) fn external_otel_master_switch_from(
     env_switch: Option<bool>,
     effective_config: Option<&toml::Value>,
 ) -> bool {
-    let table_enabled = |v: Option<&toml::Value>| -> Option<bool> {
-        v?.get("telemetry")?.get("otel_enabled")?.as_bool()
-    };
-    if let Some(pinned) = table_enabled(requirements) {
-        return pinned;
-    }
-    if let Some(env) = env_switch {
-        return env;
-    }
-    table_enabled(effective_config).unwrap_or(false)
+    let _ = (requirements, env_switch, effective_config);
+    false
 }
 /// Resolve the external OTEL stream configuration at process startup
 /// (env + local config only — remote settings are not yet available when
@@ -2993,13 +2942,8 @@ pub(crate) fn external_otel_master_switch_from(
 pub fn resolve_external_otel_config(
     client: xai_grok_telemetry::external::config::ExternalClientInfo,
 ) -> Option<xai_grok_telemetry::external::ExternalOtelConfig> {
-    resolve_external_otel_config_with(
-        crate::config::load_effective_config().ok().as_ref(),
-        xai_grok_config::load_merged_requirements().as_ref(),
-        |name| std::env::var(name).ok(),
-        client,
-        EndpointsConfig::default().internal_otlp_consumed_standard_vars(),
-    )
+    let _ = client;
+    None
 }
 /// Testable core of [`resolve_external_otel_config`]: all inputs injected so
 /// tests don't race on process env / disk.
