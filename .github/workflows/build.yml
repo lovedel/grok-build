@@ -9,7 +9,9 @@ permissions:
 jobs:
   build:
     name: Build release binary
-    runs-on: ubuntu-latest
+    # Build on Ubuntu 22.04 so Linux artifacts link against glibc 2.35
+    # instead of the newer glibc from ubuntu-latest (currently 24.04+).
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout repository
@@ -25,12 +27,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
       - name: Build release binary
-        run: cargo build -p xai-grok-pager-bin --release --locked
+        run: cargo build -p xai-grok-pager-bin --release --locked --target x86_64-unknown-linux-gnu
 
       - name: Prepare artifact
         run: |
           mkdir -p dist
-          cp target/release/xai-grok-pager dist/grok-linux-x86_64
+          cp target/x86_64-unknown-linux-gnu/release/xai-grok-pager dist/grok-linux-x86_64
           chmod +x dist/grok-linux-x86_64
 
       - name: Upload artifact
